@@ -94,7 +94,7 @@ st.plotly_chart(fig, use_container_width=True)
 
 # --- MONTE CARLO SIMULATION ---
 st.divider()
-st.subheader("🎲 Monte Carlo Risk Simulation")
+st.subheader("Monte Carlo Risk Simulation")
 n_sims = st.select_slider("Number of Iterations", options=[100, 500, 1000], value=500)
 
 if st.button("Run Simulation"):
@@ -114,7 +114,7 @@ if st.button("Run Simulation"):
 
 # --- EXPORT ---
 st.download_button(
-    label="📥 Export Model to CSV",
+    label="📥 Export to CSV",
     data=cash_flows.to_csv().encode('utf-8'),
     file_name='financial_model.csv',
     mime='text/csv',
