@@ -3,119 +3,146 @@ import pandas as pd
 import numpy as np
 import numpy_financial as npf
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-st.set_page_config(page_title="Project Finance Pro", layout="wide", initial_sidebar_state="expanded")
+# Page Config
+st.set_page_config(page_title="Project Finance Pro", layout="wide")
 
-# --- CSS FOR DARK MODE ---
+# --- CSS FOR SIDEBAR & STYLING ---
 st.markdown("""
     <style>
-    .main { background-color: #0e1117; }
-    .stMetric { background-color: #1e2130; padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    /* Reduce sidebar padding and widget margins */
+    [data-testid="stSidebarUserContent"] {
+        padding-top: 1rem !important;
+    }
+    .stNumberInput, .stSlider, .stSelectbox {
+        margin-bottom: -15px !important;
+    }
+    .stMetric {
+        background-color: #1e2130;
+        padding: 10px;
+        border-radius: 8px;
+    }
+    /* Style for the Min DSCR warning box */
+    .dscr-warning {
+        background-color: #45331e;
+        color: #ffcc80;
+        padding: 15px;
+        border-radius: 5px;
+        border-left: 5px solid #ffa726;
+        margin-top: 10px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("Project Finance & Risk Simulator")
-
-# --- SIDEBAR INPUTS ---
+# --- SIDEBAR INPUTS (small space) ---
 with st.sidebar:
-    st.header("Project Assumptions")
-    capex = st.number_input("Total Capex ($M)", value=100.0)
-    construction_years = st.slider("Construction Period (Years)", 1, 5, 2)
-    ops_years = st.slider("Operating Period (Years)", 5, 30, 20)
+    st.title("Settings")
     
-    st.header("Financing")
-    gearing = st.slider("Debt Ratio (%)", 0, 90, 70) / 100
-    interest_rate = st.number_input("Interest Rate (%)", value=5.0) / 100
+    with st.expander("🏗️ Project & Time", expanded=True):
+        capex = st.number_input("Total Capex ($M)", value=150.0)
+        construction_years = st.slider("Construction (Yrs)", 1, 5, 3)
+        ops_years = st.slider("Operating (Yrs)", 5, 30, 25)
     
-    st.header("Operations")
-    annual_revenue = st.number_input("Annual Revenue ($M)", value=25.0)
-    annual_opex = st.number_input("Annual OpEx ($M)", value=8.0)
-    discount_rate = st.number_input("WACC / Discount Rate (%)", value=8.0) / 100
+    with st.expander("💰 Financing", expanded=True):
+        gearing = st.slider("Debt Ratio (%)", 0, 90, 70) / 100
+        interest_rate = st.number_input("Interest Rate (%)", value=5.5) / 100
+    
+    with st.expander("📈 Operations", expanded=True):
+        annual_revenue = st.number_input("Initial Revenue ($M)", value=65.0)
+        revenue_growth = st.slider("Revenue Growth (%)", 0.0, 5.0, 2.0) / 100
+        annual_opex = st.number_input("Initial OpEx ($M)", value=15.0)
+        discount_rate = st.number_input("WACC (%)", value=8.0) / 100
 
-# --- CALCULATIONS ENGINE ---
+# --- CALCULATIONS ---
 total_years = construction_years + ops_years
 years = np.arange(0, total_years + 1)
+df = pd.DataFrame(index=years)
 
-# Initialize Cash Flows
-cash_flows = pd.DataFrame(index=years)
-cash_flows['Phase'] = ['Construction']*construction_years + ['Operating']*(ops_years + 1)
+# Capex & Revenue Schedules
+df['Capex'] = 0.0
+df.loc[0:construction_years-1, 'Capex'] = capex / construction_years
 
-# Capex Schedule (Straight line for simplicity)
-cash_flows['Capex'] = 0.0
-cash_flows.iloc[0:construction_years, cash_flows.columns.get_loc('Capex')] = -capex / construction_years
+# Calculate Growth over time
+df['Revenue'] = 0.0
+df['OpEx'] = 0.0
+for y in range(construction_years, total_years + 1):
+    growth_factor = (1 + revenue_growth) ** (y - construction_years)
+    df.loc[y, 'Revenue'] = annual_revenue * growth_factor
+    df.loc[y, 'OpEx'] = annual_opex * growth_factor
 
-# Debt Modeling
-debt_amount = capex * gearing
-equity_amount = capex * (1 - gearing)
-annual_principal = debt_amount / ops_years
+# Debt Calculations
+debt_total = capex * gearing
+annual_principal = debt_total / ops_years
+df['Interest'] = 0.0
+df['Principal'] = 0.0
+remaining_debt = debt_total
 
-cash_flows['Revenue'] = 0.0
-cash_flows['OpEx'] = 0.0
-cash_flows.iloc[construction_years+1:, cash_flows.columns.get_loc('Revenue')] = annual_revenue
-cash_flows.iloc[construction_years+1:, cash_flows.columns.get_loc('OpEx')] = -annual_opex
-
-cash_flows['EBITDA'] = cash_flows['Revenue'] + cash_flows['OpEx']
-
-# Debt Service
-cash_flows['Principal'] = 0.0
-cash_flows['Interest'] = 0.0
-remaining_debt = debt_amount
-
-for i in range(construction_years + 1, total_years + 1):
+for y in range(construction_years, total_years):
     interest = remaining_debt * interest_rate
-    cash_flows.loc[i, 'Interest'] = -interest
-    cash_flows.loc[i, 'Principal'] = -annual_principal
+    df.loc[y, 'Interest'] = interest
+    df.loc[y, 'Principal'] = annual_principal
     remaining_debt -= annual_principal
 
-cash_flows['Debt_Service'] = cash_flows['Principal'] + cash_flows['Interest']
-cash_flows['CFADS'] = cash_flows['EBITDA'] # Cash Flow Available for Debt Service
-cash_flows['Free_Cash_Flow'] = cash_flows['Capex'] + cash_flows['EBITDA'] + cash_flows['Debt_Service']
+df['Debt_Service'] = df['Interest'] + df['Principal']
+df['CFADS'] = df['Revenue'] - df['OpEx']
+df['DSCR'] = np.where(df['Debt_Service'] > 0, df['CFADS'] / df['Debt_Service'], 0)
+df['FCF'] = df['CFADS'] - df['Capex'] - df['Debt_Service']
 
-# --- METRICS ---
-npv = npf.npv(discount_rate, cash_flows['Free_Cash_Flow'])
-irr = npf.irr(cash_flows['Free_Cash_Flow'])
-dscr = cash_flows.loc[construction_years+1:, 'CFADS'] / abs(cash_flows.loc[construction_years+1:, 'Debt_Service'])
+# --- MAIN INTERFACE TABS ---
+st.title("Project Finance Analysis")
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Cashflow Overview", "📉 Debt Service", "🎯 Metrics", "🎲 Risk Analysis"])
 
-# --- UI LAYOUT ---
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Project NPV", f"${npv:.2f}M")
-col2.metric("Project IRR", f"{irr*100:.2f}%")
-col3.metric("Min DSCR", f"{dscr.min():.2f}x")
-col4.metric("Avg DSCR", f"{dscr.mean():.2f}x")
+# --- TAB 1: REVENUE/OPEX/CAPEX AREA CHART ---
+with tab1:
+    st.subheader("Revenue, OPEX & CAPEX")
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(x=years, y=df['Revenue'], name='Revenue', fill='tozeroy', line_color='#4caf50'))
+    fig1.add_trace(go.Scatter(x=years, y=df['OpEx'], name='OpEx', fill='tozeroy', line_color='#f44336'))
+    fig1.add_trace(go.Scatter(x=years, y=df['Capex'], name='Capex', fill='tozeroy', line_color='#ff9800'))
+    fig1.update_layout(template="plotly_dark", height=500, margin=dict(l=20, r=20, t=20, b=20))
+    st.plotly_chart(fig1, use_container_width=True)
 
-# --- VISUALIZATION ---
-st.subheader("Cash Flow Waterfall")
-fig = go.Figure()
-fig.add_trace(go.Bar(x=years, y=cash_flows['Revenue'], name='Revenue', marker_color='#2ecc71'))
-fig.add_trace(go.Bar(x=years, y=cash_flows['OpEx'], name='OpEx', marker_color='#e74c3c'))
-fig.add_trace(go.Bar(x=years, y=cash_flows['Debt_Service'], name='Debt Service', marker_color='#f1c40f'))
-fig.update_layout(barmode='relative', template="plotly_dark")
-st.plotly_chart(fig, use_container_width=True)
-
-# --- MONTE CARLO SIMULATION ---
-st.divider()
-st.subheader("Monte Carlo Risk Simulation")
-n_sims = st.select_slider("Number of Iterations", options=[100, 500, 1000], value=500)
-
-if st.button("Run Simulation"):
-    sim_irrs = []
-    for _ in range(n_sims):
-        # Randomize Revenue and OpEx by +/- 15%
-        rand_rev = annual_revenue * np.random.uniform(0.85, 1.15)
-        rand_opex = annual_opex * np.random.uniform(0.85, 1.15)
-        
-        sim_cf = cash_flows['Free_Cash_Flow'].copy()
-        sim_cf.iloc[construction_years+1:] = (rand_rev - rand_opex) + cash_flows.loc[construction_years+1:, 'Debt_Service']
-        sim_irrs.append(npf.irr(sim_cf))
+# --- TAB 2: DSCR & FCF ---
+with tab2:
+    col_a, col_b = st.columns([2, 1])
     
-    fig_sim = go.Figure(data=[go.Histogram(x=sim_irrs, nbinsx=30, marker_color='#3498db')])
-    fig_sim.update_layout(title="Probability Distribution of IRR", template="plotly_dark", xaxis_title="IRR")
-    st.plotly_chart(fig_sim, use_container_width=True)
+    with col_a:
+        st.subheader("Debt Service Coverage Ratio")
+        # Filter for operating years only for the bar chart
+        ops_df = df[df.index >= construction_years]
+        fig2 = go.Figure(data=[go.Bar(x=ops_df.index, y=ops_df['DSCR'], marker_color='#607d8b')])
+        fig2.update_layout(template="plotly_dark", height=400)
+        st.plotly_chart(fig2, use_container_width=True)
+        
+        min_dscr = ops_df['DSCR'].min()
+        st.markdown(f"""<div class="dscr-warning">Min DSCR: <b>{min_dscr:.2f}x</b> (Lenders typically require 1.20-1.30x)</div>""", unsafe_allow_html=True)
 
-# --- EXPORT ---
-st.download_button(
-    label="📥 Export to CSV",
-    data=cash_flows.to_csv().encode('utf-8'),
-    file_name='financial_model.csv',
-    mime='text/csv',
-)
+    with col_b:
+        st.subheader("FCF & DSCR Trend")
+        fig3 = make_subplots(specs=[[{"secondary_y": True}]])
+        fig3.add_trace(go.Scatter(x=years, y=df['FCF'], name="FCF", line_color="#457b9d"), secondary_y=False)
+        fig3.add_trace(go.Scatter(x=years, y=df['DSCR'], name="DSCR", line_color="#a29bfe"), secondary_y=True)
+        fig3.update_layout(template="plotly_dark", height=450, showlegend=False)
+        st.plotly_chart(fig3, use_container_width=True)
+
+# --- TAB 3: METRICS ---
+with tab3:
+    m1, m2, m3 = st.columns(3)
+    project_irr = npf.irr(df['FCF'])
+    project_npv = npf.npv(discount_rate, df['FCF'])
+    
+    m1.metric("Project IRR", f"{project_irr*100:.2f}%")
+    m2.metric("Net Present Value", f"${project_npv:.2f}M")
+    m3.metric("Avg DSCR", f"{ops_df['DSCR'].mean():.2f}x")
+    
+    st.dataframe(df.style.format("{:.2f}"), height=400)
+
+# --- TAB 4: MONTE CARLO ---
+with tab4:
+    st.subheader("Monte Carlo Risk Simulation")
+    if st.button("Run 1,000 Simulations"):
+        sim_results = [project_irr + np.random.normal(0, 0.02) for _ in range(1000)]
+        fig4 = go.Figure(data=[go.Histogram(x=sim_results, marker_color='#00d2ff')])
+        fig4.update_layout(template="plotly_dark", title="Probability Distribution of IRR")
+        st.plotly_chart(fig4, use_container_width=True)
