@@ -14,7 +14,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🏗️ Project Finance & Risk Simulator")
+st.title("Project Finance & Risk Simulator")
 
 # --- SIDEBAR INPUTS ---
 with st.sidebar:
