@@ -65,9 +65,9 @@ def main():
 
     # ---------- header + headline numbers ----------
     st.title("Project Finance Modeler")
-    st.caption("Annual model. Construction is funded with debt and equity in the same proportion, "
-               "interest during construction is added to the loan, and the loan is repaid in level "
-               "payments over the operating life.")
+    st.caption("Annual model | Construction funded with D & E in same proportion | "
+               "interest during construction is added to the loan, loan is repaid in level "
+               "payments over operating life")
 
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Project IRR (unlevered, after tax)", pct(res["project_irr"]))
@@ -89,8 +89,8 @@ def main():
         fig.update_layout(template="plotly_dark", barmode="group", height=450,
                           xaxis_title="Year", yaxis_title="$M", margin=dict(l=20, r=20, t=30, b=20))
         st.plotly_chart(fig, use_container_width=True)
-        st.caption("Project FCF ignores financing (EBITDA minus unlevered tax minus capex). "
-                   "Equity FCF is what the sponsor puts in and gets back after debt service and tax.")
+        st.caption("Project FCF ignores financing (EBITDA - unlevered tax - capex). "
+                   "Equity FCF = what the sponsor puts in and gets back after debt service and tax.")
 
     # ---------- debt ----------
     with tab2:
@@ -166,7 +166,7 @@ def main():
         st.download_button("Download table as CSV", tbl.to_csv().encode(), "project_cash_flows.csv", "text/csv")
 
     st.caption("Limits: annual periods, no tax loss carryforward, no reserve accounts, "
-               "and debt share is an input rather than sized to a target DSCR.")
+               "and debt share is an input (not sized to a target DSCR).")
 
 
 if __name__ == "__main__":
